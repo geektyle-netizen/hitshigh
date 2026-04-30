@@ -1,0 +1,141 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // Global safety net
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // Primitive Helpers
+    function isSignedIn() { return request.auth != null; }
+    function isAdmin() { 
+      return isSignedIn() && (request.auth.token.email == 'admin@hitshigh.com' || (exists(/databases/$(database)/documents/users/$(request.auth.uid)) && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin')); 
+    }
+    function isOwner(userId) { return isSignedIn() && request.auth.uid == userId; }
+    function existing() { return resource.data; }
+    function incoming() { return request.resource.data; }
+
+    function isValidId(id) { 
+      return id is string && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$'); 
+    }
+
+    // --- Users ---
+    function isValidUser(data) {
+      return data.keys().hasAny(['id', 'role', 'name', 'email']) &&
+             data.id is string && data.id.size() <= 128 &&
+             data.role is string && data.role in ['user', 'vendor', 'admin'] &&
+             data.name is string && data.name.size() <= 100 &&
+             data.email is string && data.email.size() <= 100 &&
+             data.get('phone', '') is string && data.get('phone', '').size() <= 20 &&
+             data.get('location', '') is string && data.get('location', '').size() <= 100 &&
+             data.get('profilePic', '') is string && data.get('profilePic', '').size() <= 1000000 &&
+             data.get('isCompleted', false) is bool &&
+             data.get('isRedFlagged', false) is bool &&
+             data.get('isBlocked', false) is bool &&
+             // Vendor fields
+             data.get('description', '') is string && data.get('description', '').size() <= 1000 &&
+             data.get('instagram', '') is string && data.get('instagram', '').size() <= 200 &&
+             data.get('locations', []) is list && data.get('locations', []).size() <= 20 &&
+             data.get('images', []) is list && data.get('images', []).size() <= 20 &&
+             data.get('portfolio', []) is list && data.get('portfolio', []).size() <= 20 &&
+             data.get('services', []) is list && data.get('services', []).size() <= 50 &&
+             data.get('verificationStatus', '') is string && data.get('verificationStatus', '').size() <= 20 &&
+             data.get('rating', 0.0) is number;
+    }
+
+    match /users/{userId} {
+      allow read: if isSignedIn();
+      allow create: if isOwner(userId) && isValidId(userId) && isValidUser(incoming()) && incoming().id == userId && incoming().isBlocked == false && incoming().isRedFlagged == false && (incoming().role != 'admin' || request.auth.token.email == 'admin@hitshigh.com');
+      allow update: if isSignedIn() && isValidUser(incoming()) && (
+        isAdmin() ||
+        (isOwner(userId) && existing().isBlocked == false &&
+          (
+            // Admin only fields untouched
+            incoming().diff(existing()).affectedKeys().hasOnly(['name', 'phone', 'location', 'profilePic', 'isCompleted', 'description', 'instagram', 'locations', 'images', 'portfolio', 'services', 'verificationStatus', 'rating'])
+          )
+        )
+      );
+      allow delete: if isAdmin() || isOwner(userId);
+    }
+
+    // --- Bookings ---
+    function isValidBooking(data) {
+      return data.keys().hasAny(['id', 'userId', 'vendorId', 'date', 'status']) &&
+             data.id is string && data.id.size() <= 128 &&
+             data.userId is string && data.userId.size() <= 128 &&
+             data.vendorId is string && data.vendorId.size() <= 128 &&
+             data.date is string &&
+             data.status is string && data.status in ['pending', 'confirmed', 'completed', 'rejected'] &&
+             data.get('package', '') is string && data.get('package', '').size() <= 100 &&
+             data.get('location', '') is string && data.get('location', '').size() <= 100 &&
+             data.get('people', '') is string && data.get('people', '').size() <= 50 &&
+             data.get('type', '') is string && data.get('type', '').size() <= 50 &&
+             data.get('isReviewed', false) is bool;
+    }
+
+    match /bookings/{bookingId} {
+      allow read: if isSignedIn() && (isAdmin() || resource.data.userId == request.auth.uid || resource.data.vendorId == request.auth.uid);
+      allow list: if isSignedIn() && (isAdmin() || resource.data.userId == request.auth.uid || resource.data.vendorId == request.auth.uid);
+      allow create: if isSignedIn() && isValidId(bookingId) && isValidBooking(incoming()) &&
+                    incoming().userId == request.auth.uid &&
+                    (incoming().vendorId == 'none' || (exists(/databases/$(database)/documents/users/$(incoming().vendorId)) && get(/databases/$(database)/documents/users/$(incoming().vendorId)).data.role == 'vendor')) &&
+                    incoming().status == 'pending';
+      allow update: if isSignedIn() && isValidBooking(incoming()) && (
+        isAdmin() ||
+        (existing().vendorId == request.auth.uid && incoming().diff(existing()).affectedKeys().hasOnly(['status'])) ||
+        (existing().userId == request.auth.uid && incoming().diff(existing()).affectedKeys().hasOnly(['status', 'isReviewed'])) ||
+        (existing().userId == request.auth.uid && incoming().diff(existing()).affectedKeys().hasOnly(['isReviewed']))
+      );
+      allow delete: if isAdmin();
+    }
+
+    // --- Reviews ---
+    function isValidReview(data) {
+      return data.keys().hasAny(['id', 'bookingId', 'vendorId', 'userId', 'rating', 'comment', 'timestamp']) &&
+             data.id is string && data.id.size() <= 128 &&
+             data.bookingId is string && data.bookingId.size() <= 128 &&
+             data.vendorId is string && data.vendorId.size() <= 128 &&
+             data.userId is string && data.userId.size() <= 128 &&
+             data.rating is number &&
+             data.comment is string && data.comment.size() <= 2000 &&
+             data.timestamp is number &&
+             data.get('reply', '') is string && data.get('reply', '').size() <= 2000;
+    }
+
+    match /reviews/{reviewId} {
+      allow read: if isSignedIn();
+      allow list: if isSignedIn();
+      allow create: if isSignedIn() && isValidId(reviewId) && isValidReview(incoming()) && 
+                    incoming().userId == request.auth.uid;
+      allow update: if isSignedIn() && isValidReview(incoming()) && (
+        isAdmin() ||
+        (existing().vendorId == request.auth.uid && incoming().diff(existing()).affectedKeys().hasOnly(['reply']))
+      );
+      allow delete: if isAdmin();
+    }
+
+    // --- Chats ---
+    function isValidChat(data) {
+      return data.keys().hasAny(['id', 'senderId', 'receiverId', 'timestamp']) &&
+             data.id is string && data.id.size() <= 128 &&
+             data.senderId is string && data.senderId.size() <= 128 &&
+             data.receiverId is string && data.receiverId.size() <= 128 &&
+             data.timestamp is number &&
+             data.get('text', '') is string && data.get('text', '').size() <= 1000 &&
+             data.get('imageUrl', '') is string && data.get('imageUrl', '').size() <= 1000000 &&
+             data.get('isAudio', false) is bool &&
+             data.get('audioDuration', 0) is number;
+    }
+
+    match /chats/{chatId} {
+      allow read: if isSignedIn() && (isAdmin() || resource.data.senderId == request.auth.uid || resource.data.receiverId == request.auth.uid);
+      allow list: if isSignedIn() && (isAdmin() || resource.data.senderId == request.auth.uid || resource.data.receiverId == request.auth.uid);
+      allow create: if isSignedIn() && isValidId(chatId) && isValidChat(incoming()) &&
+                    incoming().senderId == request.auth.uid &&
+                    exists(/databases/$(database)/documents/users/$(incoming().receiverId)) &&
+                    (incoming().text.size() > 0 || incoming().imageUrl.size() > 0 || incoming().isAudio == true);
+      allow update: if false; // Chats are immutable
+      allow delete: if isAdmin();
+    }
+  }
+}

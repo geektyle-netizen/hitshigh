@@ -1,0 +1,79 @@
+{
+  "entities": {
+    "User": {
+      "title": "UserProfile",
+      "description": "A user or vendor profile in the system.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "role": { "type": "string", "enum": ["user", "vendor", "admin"] },
+        "name": { "type": "string" },
+        "email": { "type": "string" },
+        "phone": { "type": "string" },
+        "location": { "type": "string" },
+        "profilePic": { "type": "string" },
+        "isCompleted": { "type": "boolean" },
+        "isRedFlagged": { "type": "boolean" },
+        "isBlocked": { "type": "boolean" },
+        "locations": { "type": "array", "items": { "type": "string" } },
+        "description": { "type": "string" },
+        "instagram": { "type": "string" },
+        "images": { "type": "array", "items": { "type": "string" } },
+        "portfolio": { "type": "array", "items": { "type": "string" } },
+        "rating": { "type": "number" },
+        "createdAt": { "type": "number" },
+        "updatedAt": { "type": "number" }
+      },
+      "required": ["id", "role", "name", "email"]
+    },
+    "Booking": {
+      "title": "Booking",
+      "description": "An event booking request from a user to a vendor.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "userId": { "type": "string" },
+        "vendorId": { "type": "string" },
+        "date": { "type": "number" },
+        "status": { "type": "string", "enum": ["pending", "confirmed", "completed"] },
+        "package": { "type": "string" },
+        "location": { "type": "string" },
+        "people": { "type": "string" },
+        "type": { "type": "string" },
+        "createdAt": { "type": "number" },
+        "updatedAt": { "type": "number" }
+      },
+      "required": ["id", "userId", "vendorId", "date", "status"]
+    },
+    "Message": {
+      "title": "Message",
+      "description": "A chat message between a user and a vendor.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "senderId": { "type": "string" },
+        "receiverId": { "type": "string" },
+        "text": { "type": "string" },
+        "timestamp": { "type": "number" },
+        "imageUrl": { "type": "string" },
+        "isAudio": { "type": "boolean" },
+        "audioDuration": { "type": "number" }
+      },
+      "required": ["id", "senderId", "receiverId", "timestamp"]
+    }
+  },
+  "firestore": {
+    "/users/{userId}": {
+      "schema": { "$ref": "#/entities/User" },
+      "description": "Contains user and vendor profiles."
+    },
+    "/bookings/{bookingId}": {
+      "schema": { "$ref": "#/entities/Booking" },
+      "description": "Contains system-wide bookings."
+    },
+    "/chats/{chatId}": {
+      "schema": { "$ref": "#/entities/Message" },
+      "description": "Contains individual chat messages between users and vendors."
+    }
+  }
+}
