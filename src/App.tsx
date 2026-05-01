@@ -338,6 +338,55 @@ export default function App() {
 
 // --- COMPONENTS ---
 
+// Email Verification Widget
+function EmailVerificationWidget() {
+  const [status, setStatus] = useState<'idle' | 'verifying' | 'verified'>(auth.currentUser?.emailVerified ? 'verified' : 'idle');
+
+  const handleVerify = async () => {
+    if (!auth.currentUser) return;
+    try {
+      await sendEmailVerification(auth.currentUser);
+    } catch(e) {} // ignore if quota exceeded or mock runs
+    
+    // As requested: just a loading for 4 seconds with verifying text and after that successfully verified
+    setStatus('verifying');
+    setTimeout(() => {
+      setStatus('verified');
+    }, 4000);
+  };
+
+  if (status === 'verified') {
+    return (
+      <div className="flex justify-center items-center space-x-2 text-teal-400 bg-teal-500/10 p-3 rounded-xl border border-teal-500/20 mb-6">
+        <ShieldCheck size={18} />
+        <span className="text-sm font-medium">Email Verified</span>
+      </div>
+    );
+  }
+
+  return (
+    <div className="bg-gray-900 border border-gray-800 p-4 rounded-xl mb-6 text-center">
+      <div className="flex items-center justify-center space-x-2 mb-3 text-gray-300">
+        <AlertTriangle size={16} className="text-amber-500" />
+        <span className="text-sm font-medium">Email Not Verified</span>
+      </div>
+      {status === 'verifying' ? (
+        <div className="text-sm text-teal-400 font-medium py-1.5 flex items-center justify-center space-x-2">
+           <div className="w-4 h-4 border-2 border-teal-500 border-t-transparent rounded-full animate-spin"></div>
+           <span>Verifying...</span>
+        </div>
+      ) : (
+        <button 
+          onClick={handleVerify}
+          className="bg-teal-500/10 hover:bg-teal-500/20 text-teal-400 text-sm font-bold py-2 px-6 rounded-full transition-colors border border-teal-500/20"
+        >
+          Verify Email
+        </button>
+      )}
+    </div>
+  );
+}
+
 // 1. Auth Screen
 function AuthScreen({ onLogin, setUsers, users, pendingOAuthUser, onCancelPending }: { onLogin: (u: UserProfile) => void, setUsers: any, users: UserProfile[], pendingOAuthUser?: any, onCancelPending?: () => void }) {
   const [authMode, setAuthMode] = useState<'login' | 'signup-user' | 'signup-vendor' | 'forgot-password'>('login');
@@ -350,6 +399,7 @@ function AuthScreen({ onLogin, setUsers, users, pendingOAuthUser, onCancelPendin
   const [showPassword, setShowPassword] = useState(false);
   const [showConfirmPassword, setShowConfirmPassword] = useState(false);
   const [oauthRole, setOauthRole] = useState<'user' | 'vendor'>('user');
+  const [resetSuccess, setResetSuccess] = useState(false);
   const role = authMode === 'signup-vendor' ? 'vendor' : 'user';
 
   const handleAppleLogin = async () => {
@@ -378,7 +428,7 @@ function AuthScreen({ onLogin, setUsers, users, pendingOAuthUser, onCancelPendin
     if (!pendingOAuthUser) return;
     setLoading(true);
     try {
-      await setDoc(doc(db, 'users', pendingOAuthUser.uid), {
+      const newUser = {
         id: pendingOAuthUser.uid, 
         role: oauthRole, 
         name: pendingOAuthUser.displayName || 'User', 
@@ -387,11 +437,9 @@ function AuthScreen({ onLogin, setUsers, users, pendingOAuthUser, onCancelPendin
         isCompleted: false, 
         isBlocked: false, 
         isRedFlagged: false
-      });
-      // the App.tsx onAuthStateChanged listener might not re-fire if auth state hasn't changed,
-      // so we should force a reload of the listener or reload the page?
-      // Wait, we can just trigger a manual getDoc and then the app state will update
-      window.location.reload(); 
+      };
+      await setDoc(doc(db, 'users', newUser.id), newUser);
+      onLogin(newUser as UserProfile);
     } catch(e: any) {
       alert("Failed to complete setup: " + e.message);
     } finally {
@@ -457,8 +505,7 @@ function AuthScreen({ onLogin, setUsers, users, pendingOAuthUser, onCancelPendin
           return;
         }
         await sendPasswordResetEmail(auth, loginId);
-        alert("Password reset email sent! Check your inbox.");
-        setAuthMode('login');
+        setResetSuccess(true);
         setLoading(false);
         return;
       } else if (authMode === 'login') {
@@ -614,8 +661,35 @@ function AuthScreen({ onLogin, setUsers, users, pendingOAuthUser, onCancelPendin
         </div>
 
         {authMode === 'forgot-password' && (
-          <div className="mt-6 text-center text-sm">
-             <button type="button" onClick={() => setAuthMode('login')} className="text-teal-500 hover:text-teal-400">Back to Login</button>
+          <div className="space-y-4">
+            {resetSuccess ? (
+              <div className="bg-teal-900/30 border border-teal-500/50 p-4 rounded-xl text-center">
+                <CheckCircle className="text-teal-400 w-10 h-10 mx-auto mb-2" />
+                <p className="text-white font-bold text-lg mb-1">Check your email</p>
+                <p className="text-gray-300 text-sm mb-3">A password reset link has been sent to your inbox.</p>
+                <p className="text-yellow-400 text-sm font-bold bg-yellow-900/30 p-2 rounded-lg border border-yellow-500/50">
+                  Please remember to check your spam or junk folder!
+                </p>
+              </div>
+            ) : (
+              <>
+                <div className="relative">
+                  <input 
+                    type="email" placeholder="Email Address" required value={loginId} onChange={e => setLoginId(e.target.value)}
+                    className="w-full bg-gray-950 border border-gray-800 rounded-xl px-4 py-3 focus:outline-none focus:border-teal-500 transition-colors text-white placeholder-gray-500 text-sm"
+                  />
+                </div>
+                <motion.button 
+                  whileHover={{ scale: 1.02 }} whileTap={{ scale: 0.98 }}
+                  type="submit" disabled={loading} className="w-full bg-gradient-to-r from-teal-500 to-teal-700 text-white font-bold py-4 rounded-xl shadow-[0_0_20px_rgba(20,184,166,0.3)] mt-2 disabled:opacity-50"
+                >
+                  {loading ? 'Processing...' : 'Send Reset Link'}
+                </motion.button>
+              </>
+            )}
+            <div className="mt-6 text-center text-sm">
+               <button type="button" onClick={() => { setAuthMode('login'); setResetSuccess(false); }} className="text-teal-500 hover:text-teal-400">Back to Login</button>
+            </div>
           </div>
         )}
 
@@ -1126,7 +1200,11 @@ function VendorProfile({ user, onUpdate, onLogout }: { user: UserProfile | null,
            {formData.profilePic ? <img src={formData.profilePic} alt="profile" className="w-full h-full object-cover" /> : <User size={32} className="text-gray-400" />}
            <input type="file" accept="image/*" onChange={(e) => handleFileUpload(e, 'profilePic')} className="absolute inset-0 opacity-0 cursor-pointer z-10" />
         </div>
-        <span className="text-xs text-gray-500">Tap to update logo</span>
+        <span className="text-xs text-gray-500 mb-4">Tap to update logo</span>
+        
+        <div className="w-full">
+           <EmailVerificationWidget />
+        </div>
       </div>
 
       <div className="space-y-4">
@@ -1312,6 +1390,10 @@ function UserProfileScreen({ user, onUpdate, onLogout }: { user: UserProfile | n
              Client Account
           </div>
         </div>
+      </div>
+      
+      <div className="w-full">
+         <EmailVerificationWidget />
       </div>
 
        <div className="space-y-4">
